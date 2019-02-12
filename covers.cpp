@@ -13,6 +13,8 @@
 #include <regex.h>
 #include <stdio.h>
 
+#include "CoverWindow.h"
+
 
 #define MAX_GROUPS 10
 #define MAX_MATCHES 10
@@ -68,7 +70,7 @@ loadImage(int countryCode, const BString& id, const char* type)
 
 	const BHttpResult& result = dynamic_cast<const BHttpResult&>(
 		request.Result());
-	printf("Status: %d - %s\n", result.StatusCode(),
+	printf("Status: %" B_PRId32 " d - %s\n", result.StatusCode(),
 		result.StatusText().String());
 
 	listener.IO().Seek(0, SEEK_SET);
@@ -120,7 +122,7 @@ getImageFromAmazon(const char* country, int countryCode, const BString& artist,
 
 	const BHttpResult& result = dynamic_cast<const BHttpResult&>(
 		request.Result());
-	printf("Status: %d - %s\n", result.StatusCode(),
+	printf("Status: %" B_PRId32 " - %s\n", result.StatusCode(),
 		result.StatusText().String());
 
 	BString data((const char*)listener.IO().Buffer(),
@@ -136,7 +138,7 @@ getImageFromAmazon(const char* country, int countryCode, const BString& artist,
 		BString id;
 
 		for (int groupIndex = 0; groupIndex < MAX_GROUPS; groupIndex++) {
-			if (groups[groupIndex].rm_so == (size_t)-1)
+			if (groups[groupIndex].rm_so == -1)
 				break;
 			if (groupIndex == 0)
 				offset = groups[0].rm_eo;
@@ -168,5 +170,11 @@ int
 main()
 {
 	BApplication application("application/x-vnd.pinc-covers");
-	getImageFromAmazon("de", COUNTRY_GERMANY, "toundra", "");
+//	getImageFromAmazon("de", COUNTRY_GERMANY, "toundra", "");
+
+	BWindow* window = new CoverWindow();
+	window->CenterOnScreen();
+	window->Show();
+
+	application.Run();
 }

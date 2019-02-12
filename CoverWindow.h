@@ -8,6 +8,9 @@
 #include <Window.h>
 
 
+class BGridView;
+
+
 class CoverWindow : public BWindow {
 public:
 								CoverWindow();
@@ -16,7 +19,7 @@ public:
 	virtual	void				MessageReceived(BMessage* message);
 
 private:
-			BView*				fMainView;
+			BGridView*			fMainView;
 };
 
 
