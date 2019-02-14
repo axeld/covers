@@ -11,6 +11,8 @@
 class BGridView;
 class BTextControl;
 
+class Query;
+
 
 class CoverWindow : public BWindow {
 public:
@@ -20,10 +22,14 @@ public:
 	virtual	void				MessageReceived(BMessage* message);
 
 private:
+			void				_AbortQuery();
+
+private:
 			BGridView*			fMainView;
 			BTextControl*		fArtistControl;
 			BTextControl*		fTitleControl;
-			void*				fQuery;
+			Query*				fQuery;
+			int32				fCount;
 };
 
 

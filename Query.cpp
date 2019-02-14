@@ -16,9 +16,11 @@
 #include <regex.h>
 #include <stdio.h>
 
+#include "Utility.h"
+
 
 #define MAX_GROUPS 10
-#define MAX_MATCHES 10
+#define MAX_MATCHES 20
 
 #define COUNTRY_GERMANY 3
 
@@ -27,69 +29,12 @@
 #define TYPE_THUMB "THUMB"
 
 
-enum ImageSize {
-	kThumb,
-	kLarge,
-	kOriginal,
-};
-
-
-class DataListener : public BUrlProtocolListener {
-public:
-	DataListener()
-	{
-	}
-
-	virtual ~DataListener()
-	{
-	}
-
-	virtual void DataReceived(BUrlRequest* request, const char* data,
-		off_t offset, ssize_t size)
-	{
-		fResult.Write(data, size);
-	}
-
-	BMallocIO& IO() { return fResult; }
-
-private:
-	BMallocIO fResult;
-};
-
-
-typedef std::map<ImageSize, BUrl> UrlMap;
-
-
-class ResultListener {
-public:
-	virtual	void				AddResult(const BString& id,
-									const char* info, UrlMap urls) = 0;
-};
-
-
-class ImageLoaderResultListener : public ResultListener {
-public:
-								ImageLoaderResultListener(
-									const BMessenger& target, ImageSize type);
-	virtual						~ImageLoaderResultListener();
-
-	virtual	void				AddResult(const BString& id,
-									const char* info, UrlMap urls);
-
-private:
-			BBitmap*			_LoadImage(const BUrl& url);
-
-private:
-			BMessenger			fTarget;
-			ImageSize			fType;
-};
-
-
 class Retriever {
 public:
 								Retriever(ResultListener& listener);
 	virtual						~Retriever();
 
+	virtual	void				Abort() = 0;
 	virtual void				Retrieve(const BString& artist,
 									const BString& title) = 0;
 
@@ -105,6 +50,7 @@ public:
 									ResultListener& listener);
 	virtual						~AmazonRetriever();
 
+	virtual	void				Abort();
 	virtual void				Retrieve(const BString& artist,
 									const BString& title);
 
@@ -114,6 +60,7 @@ private:
 private:
 			int					fCountryCode;
 			BString				fCountry;
+			bool				fAbort;
 };
 
 
@@ -140,13 +87,21 @@ AmazonRetriever::AmazonRetriever(int countryCode, const char* country,
 	:
 	Retriever(listener),
 	fCountryCode(countryCode),
-	fCountry(country)
+	fCountry(country),
+	fAbort(false)
 {
 }
 
 
 AmazonRetriever::~AmazonRetriever()
 {
+}
+
+
+void
+AmazonRetriever::Abort()
+{
+	fAbort = true;
 }
 
 
@@ -185,11 +140,11 @@ AmazonRetriever::Retrieve(const BString& artist, const BString& title)
 	DataListener listener;
 	request.SetListener(&listener);
 	request.Run();
-	while (request.IsRunning()) {
+	while (request.IsRunning() && !fAbort) {
 		snooze(50000);
-		putchar('.');
-		fflush(stdout);
 	}
+	if (fAbort)
+		return;
 
 	const BHttpResult& result = dynamic_cast<const BHttpResult&>(
 		request.Result());
@@ -207,27 +162,42 @@ AmazonRetriever::Retrieve(const BString& artist, const BString& title)
 			break;
 
 		BString id;
+		BString info;
 
 		for (int groupIndex = 0; groupIndex < MAX_GROUPS; groupIndex++) {
 			if (groups[groupIndex].rm_so == -1)
 				break;
-			if (groupIndex == 0)
-				offset = groups[0].rm_eo;
+
+printf("%d. (%d - %d)\n", groupIndex, groups[groupIndex].rm_so, groups[groupIndex].rm_eo);
+			if (groupIndex == 3)
+				offset = groups[3].rm_eo;
 
 			int length = groups[groupIndex].rm_eo - groups[groupIndex].rm_so;
 			BString match(cursor + groups[groupIndex].rm_so, length);
 			if (groupIndex)
 				printf("%d: match? %s\n", groupIndex, match.String());
-			if (groupIndex == 3)
-				id = match;
+			switch (groupIndex) {
+				case 1:
+					info = match;
+					break;
+				case 2:
+					url = match;
+					break;
+				case 3:
+					id = match;
+					break;
+			}
 		}
 
 		if (!id.IsEmpty()) {
 			UrlMap urls;
-			urls.insert(std::make_pair(kOriginal, _GetUrl(id, TYPE_ORIGINAL)));
-			urls.insert(std::make_pair(kLarge, _GetUrl(id, TYPE_LARGE)));
-			urls.insert(std::make_pair(kThumb, _GetUrl(id, TYPE_THUMB)));
-			fListener.AddResult(id, NULL, urls);
+			urls.insert(std::make_pair(kSource, url));
+
+			urls.insert(std::make_pair(kOriginalImage,
+				_GetUrl(id, TYPE_ORIGINAL)));
+			urls.insert(std::make_pair(kLargeImage, _GetUrl(id, TYPE_LARGE)));
+			urls.insert(std::make_pair(kThumbImage, _GetUrl(id, TYPE_THUMB)));
+			fListener.AddResult(id, info, urls);
 		}
 
 printf("offset = %d\n", offset);
@@ -248,76 +218,25 @@ AmazonRetriever::_GetUrl(const BString& id, const char* type)
 }
 
 
-// #pragma mark - ImageLoaderResultListener
-
-
-ImageLoaderResultListener::ImageLoaderResultListener(const BMessenger& target,
-	ImageSize type)
-	:
-	fTarget(target),
-	fType(type)
-{
-}
-
-
-ImageLoaderResultListener::~ImageLoaderResultListener()
-{
-}
-
-
-void
-ImageLoaderResultListener::AddResult(const BString& id, const char* info,
-	UrlMap urls)
-{
-	printf("LOAD: %s\n", urls[fType].UrlString().String());
-}
-
-
-BBitmap*
-ImageLoaderResultListener::_LoadImage(const BUrl& url)
-{
-	BHttpRequest request(url);
-
-	DataListener listener;
-	request.SetListener(&listener);
-	request.Run();
-	while (request.IsRunning()) {
-		snooze(50000);
-		putchar('.');
-		fflush(stdout);
-	}
-
-	const BHttpResult& result = dynamic_cast<const BHttpResult&>(
-		request.Result());
-	printf("Status: %" B_PRId32 " d - %s\n", result.StatusCode(),
-		result.StatusText().String());
-
-	listener.IO().Seek(0, SEEK_SET);
-	return BTranslationUtils::GetBitmap(&listener.IO());
-}
-
-
 // #pragma mark - Query
 
 
-Query::Query(const BMessenger& target, const BString& artist,
-	const BString& title)
+Query::Query(const BString& artist, const BString& title)
 	:
-	fTarget(target),
 	fRetrievers(5, true),
-	fListener(NULL),
+	fListeners(5, true),
 	fArtist(artist),
 	fTitle(title),
 	fAbort(false)
 {
-	fListener = new ImageLoaderResultListener(fTarget, kThumb);
-
-	AddRetriever(new AmazonRetriever(COUNTRY_GERMANY, "de", *fListener));
+	printf("THIS NEW %p\n", this);
+	AddRetriever(new AmazonRetriever(COUNTRY_GERMANY, "de", *this));
 }
 
 
 Query::~Query()
 {
+	puts("DELETE QUERY!");
 }
 
 
@@ -325,19 +244,51 @@ void
 Query::AddRetriever(Retriever* retriever)
 {
 	fRetrievers.AddItem(retriever);
+	printf("new retriever: %ld\n", fRetrievers.CountItems());
+}
+
+
+void
+Query::AddListener(ResultListener* listener)
+{
+	fListeners.AddItem(listener);
 }
 
 
 void
 Query::Run()
 {
+	printf("retrievers: %ld\n", fRetrievers.CountItems());
+	fThread = spawn_thread(&_Run, "query artist/title", B_NORMAL_PRIORITY,
+		this);
+	if (fThread >= 0)
+		resume_thread(fThread);
 }
 
 
 void
-Query::Abort()
+Query::Abort(bool wait)
 {
+	printf("THIS Abort %p\n", this);
+	printf("THIS Abort %ld\n", fRetrievers.CountItems());
 	fAbort = true;
+	for (int32 index = 0; index < fRetrievers.CountItems(); index++)
+		fRetrievers.ItemAt(index)->Abort();
+
+	if (wait)
+		wait_for_thread(fThread, NULL);
+}
+
+
+void
+Query::AddResult(const BString& id, const char* info, UrlMap urls)
+{
+	if (fAbort)
+		return;
+
+	for (int32 i = 0; i < fListeners.CountItems(); i++) {
+		fListeners.ItemAt(i)->AddResult(id, info, urls);
+	}
 }
 
 
@@ -345,16 +296,16 @@ Query::Abort()
 Query::_Run(void* _self)
 {
 	Query* self = (Query*)_self;
-	status_t status = self->_Run();
-	delete self;
-
-	return status;
+	return self->_Run();
 }
 
 
 status_t
 Query::_Run()
 {
+	printf("THIS Run %p\n", this);
+	printf("run retriever: %ld\n", fRetrievers.CountItems());
+
 	for (int32 index = 0; index < fRetrievers.CountItems(); index++)
 		fRetrievers.ItemAt(index)->Retrieve(fArtist, fTitle);
 

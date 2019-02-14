@@ -8,31 +8,56 @@
 #include <Messenger.h>
 #include <ObjectList.h>
 #include <String.h>
+#include <Url.h>
+
+#include <map>
 
 
-class ResultListener;
+class BUrl;
 class Retriever;
 
 
-class Query {
+enum UrlType {
+	kSource,
+	kThumbImage,
+	kLargeImage,
+	kOriginalImage,
+};
+
+
+typedef std::map<UrlType, BUrl> UrlMap;
+
+
+class ResultListener {
 public:
-								Query(const BMessenger& target,
-									const BString& artist,
+	virtual	void				AddResult(const BString& id,
+									const char* info, UrlMap urls) = 0;
+};
+
+
+class Query : public ResultListener {
+public:
+								Query(const BString& artist,
 									const BString& title);
-								~Query();
+	virtual						~Query();
 
 			void				AddRetriever(Retriever* retriever);
+			void				AddListener(ResultListener* listener);
+
 			void				Run();
-			void				Abort();
+			void				Abort(bool wait = true);
+
+	virtual	void				AddResult(const BString& id,
+									const char* info, UrlMap urls);
 
 private:
 	static	status_t			_Run(void* self);
 			status_t			_Run();
 
 private:
-			BMessenger			fTarget;
+			thread_id			fThread;
 			BObjectList<Retriever>	fRetrievers;
-			ResultListener*		fListener;
+			BObjectList<ResultListener>	fListeners;
 			BString				fArtist;
 			BString				fTitle;
 			bool				fAbort;

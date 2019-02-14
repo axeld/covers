@@ -15,16 +15,37 @@
 #include <TextControl.h>
 #include <TranslationUtils.h>
 
+#include "Query.h"
+#include "Utility.h"
+
 
 static const uint32 kIconSize = 64;
+static const uint32 kMaxColumns = 4;
 
 static const uint32 kMsgAddImage = 'adIm';
 static const uint32 kMsgQuery = 'quer';
+static const uint32 kMsgSelect = 'sele';
+
+
+class ImageLoaderResultListener : public ResultListener {
+public:
+								ImageLoaderResultListener(
+									const BMessenger& target);
+	virtual						~ImageLoaderResultListener();
+
+	virtual	void				AddResult(const BString& id,
+									const char* info, UrlMap urls);
+
+private:
+			BMessenger			fTarget;
+};
 
 
 class IconView : public BView {
 public:
-								IconView(const char* id, BBitmap* bitmap);
+								IconView(const char* identifier,
+									const char* info, const char* url,
+									const char* imageUrl, BBitmap* bitmap);
 	virtual						~IconView();
 
 			void				SetSelected(bool selected);
@@ -35,26 +56,93 @@ public:
 
 private:
 			BString				fIdentifier;
+			BString				fInfo;
+			BString				fUrl;
+			BString				fImageUrl;
 			BBitmap*			fBitmap;
 			bool				fSelected;
 			float				fDescent;
 };
 
 
+// #pragma mark - ImageLoaderResultListener
+
+
+ImageLoaderResultListener::ImageLoaderResultListener(const BMessenger& target)
+	:
+	fTarget(target)
+{
+}
+
+
+ImageLoaderResultListener::~ImageLoaderResultListener()
+{
+}
+
+
+void
+ImageLoaderResultListener::AddResult(const BString& id, const char* info,
+	UrlMap urls)
+{
+	BBitmap* bitmap = NULL;
+
+	UrlType thumbTypes[] = {kThumbImage, kLargeImage, kOriginalImage};
+	for (int index = 0; index < 3; index++) {
+		UrlMap::const_iterator found = urls.find(thumbTypes[index]);
+		if (found == urls.end())
+			continue;
+
+		const BUrl& url = found->second;
+		printf("LOAD: %s\n", url.UrlString().String());
+
+		bitmap = FetchImage(url);
+		if (bitmap != NULL)
+			break;
+
+		fprintf(stderr, "Could not load image: %s\n",
+			url.UrlString().String());
+	}
+	if (bitmap == NULL)
+		return;
+
+	BMessage add(kMsgAddImage);
+	add.AddPointer("image", bitmap);
+	add.AddString("id", id);
+	add.AddString("info", info);
+	add.AddString("url", urls[kSource].UrlString().String());
+
+	UrlType types[] = {kOriginalImage, kLargeImage};
+	for (int index = 0; index < 2; index++) {
+		UrlMap::const_iterator found = urls.find(types[index]);
+		if (found == urls.end())
+			continue;
+
+		add.AddString("image_url", found->second.UrlString().String());
+		break;
+	}
+
+	fTarget.SendMessage(&add);
+}
+
+
 // #pragma mark - IconView
 
 
-IconView::IconView(const char* identifier, BBitmap* bitmap)
+IconView::IconView(const char* identifier, const char* info, const char* url,
+	const char* imageUrl, BBitmap* bitmap)
 	:
 	BView("image", B_WILL_DRAW),
 	fIdentifier(identifier),
+	fInfo(info),
+	fUrl(url),
+	fImageUrl(imageUrl),
 	fBitmap(bitmap),
 	fSelected(false)
 {
 	font_height fontHeight;
 	GetFontHeight(&fontHeight);
 
-	float width = StringWidth("WWWWWWWWWWWW");
+	float width = StringWidth("WWWWWWWWWWWWWWWWWWW");
 	float height = kIconSize + be_plain_font->Size() / 12.0f * 3.0f
 		+ ceilf(fontHeight.ascent + fontHeight.descent);
 
@@ -91,7 +179,15 @@ IconView::IsSelected()
 void
 IconView::MouseDown(BPoint where)
 {
-	SetSelected(!IsSelected());
+	int32 count = Window()->CurrentMessage()->GetInt32("clicks", 1);
+	if (count == 1)
+		SetSelected(!IsSelected());
+	else if (count == 2) {
+		BMessage select(kMsgSelect);
+		select.AddString("id", fIdentifier);
+		select.AddString("image_url", fImageUrl);
+		Window()->PostMessage(&select);
+	}
 }
 
 
@@ -107,9 +203,11 @@ IconView::Draw(BRect updateRect)
 
 	DrawBitmap(fBitmap, imageBounds);
 
-	BString text = fIdentifier;
-	text << " " << fBitmap->Bounds().IntegerWidth() << " x "
-		<< fBitmap->Bounds().IntegerHeight();
+	BString text = fInfo;
+	if (text.IsEmpty())
+		text = fIdentifier;
+	else
+		text << " (" << fIdentifier << ")";
 
 	float width = StringWidth(text.String());
 	if (width > bounds.Width()) {
@@ -164,30 +262,12 @@ CoverWindow::CoverWindow()
 			.Add(fTitleControl)
 		.End()
 		.Add(scrollView);
-
-	// TODO: for testing purposes only!
-	const char* files[] = {"/Media/Kram/Pics/band.jpg",
-		"/boot/home/Desktop/CD Cover/Antemasque - dto.jpg",
-		"/boot/home/Desktop/CD Cover/Danzig - dto.jpg",
-		"/boot/home/Desktop/CD Cover/Kate Bush - Never For Ever.jpg",
-		"/boot/home/Desktop/animation.gif",
-		"/boot/home/develop/haiku/haiku/data/artwork/HAIKU logo - white on black - normal.png",
-		"/boot/home/develop/haiku/haiku/data/artwork/HAIKU square - white on blue.png", NULL};
-	for (int i = 0; files[i] != NULL; i++) {
-		BBitmap* bitmap = BTranslationUtils::GetBitmapFile(files[i]);
-		if (bitmap == NULL)
-			continue;
-
-		BMessage add(kMsgAddImage);
-		add.AddString("amazon_id", "BX348938");
-		add.AddPointer("image", bitmap);
-		PostMessage(&add);
-	}
 }
 
 
 CoverWindow::~CoverWindow()
 {
+	_AbortQuery();
 }
 
 
@@ -199,32 +279,57 @@ CoverWindow::MessageReceived(BMessage* message)
 		{
 			BBitmap* bitmap = (BBitmap*)message->GetPointer("image");
 			if (bitmap != NULL) {
-				const char* identifier = message->GetString("amazon_id");
-				fMainView->AddChild(new IconView(identifier, bitmap));
-//				fMainView->GridLayout()->AddView(new IconView(bitmap), 0, 0);
+				const char* identifier = message->GetString("id");
+				const char* info = message->GetString("info");
+				const char* url = message->GetString("url");
+				const char* imageUrl = message->GetString("image_url");
+
+				IconView* view = new IconView(identifier, info, url, imageUrl,
+					bitmap);
+				fMainView->GridLayout()->AddView(view,
+					fCount % kMaxColumns, fCount / kMaxColumns);
+				fCount++;
 			}
+			break;
+		}
+		case kMsgSelect:
+		{
+			message->PrintToStream();
 			break;
 		}
 		case kMsgQuery:
 		{
-			if (fQuery != NULL) {
-				// Abort
-
-				// Remove previous results
-				while (BView* view = fMainView->ChildAt(0)) {
-					fMainView->RemoveChild(view);
-					delete view;
-				}
-			}
+			_AbortQuery();
 
 			// Start new query
 			BString artist = fArtistControl->Text();
 			BString title = fTitleControl->Text();
-			printf("A: %s, T: %s\n", artist.String(), title.String());
+
+			fQuery = new Query(artist, title);
+			fQuery->AddListener(new ImageLoaderResultListener(this));
+			fQuery->Run();
 			break;
 		}
 		default:
 			BWindow::MessageReceived(message);
 			break;
+	}
+}
+
+
+void
+CoverWindow::_AbortQuery()
+{
+	if (fQuery != NULL) {
+		// TODO: abort asynchronously in message loop!
+		fQuery->Abort();
+		delete fQuery;
+
+		// Remove previous results
+		while (BView* view = fMainView->ChildAt(0)) {
+			fMainView->RemoveChild(view);
+			delete view;
+		}
+		fCount++;
 	}
 }
