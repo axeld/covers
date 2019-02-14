@@ -20,7 +20,7 @@ TYPE = APP
 #	if two source files with the same name (source.c or source.cpp)
 #	are included from different directories.  Also note that spaces
 #	in folder names do not work well with this makefile.
-SRCS =  covers.cpp CoverWindow.cpp
+SRCS =  covers.cpp CoverWindow.cpp Query.cpp
 
 #	specify the resource files to use
 #	full path or a relative path to the resource file can be used.
@@ -37,7 +37,8 @@ RSRCS = covers.rsrc
 #		naming scheme you need to specify the path to the library
 #		and it's name
 #		library: my_lib.a entry: my_lib.a or path/my_lib.a
-LIBS = be media network bnetapi translation tag
+LIBS = be media network bnetapi translation
+#tag
 
 #	specify additional paths to directories following the standard
 #	libXXX.so or libXXX.a naming scheme.  You can specify full paths

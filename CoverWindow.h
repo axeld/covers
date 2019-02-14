@@ -9,6 +9,7 @@
 
 
 class BGridView;
+class BTextControl;
 
 
 class CoverWindow : public BWindow {
@@ -20,6 +21,9 @@ public:
 
 private:
 			BGridView*			fMainView;
+			BTextControl*		fArtistControl;
+			BTextControl*		fTitleControl;
+			void*				fQuery;
 };
 
 
