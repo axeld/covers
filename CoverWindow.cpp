@@ -7,7 +7,9 @@
 
 #include <stdio.h>
 
+#include <Application.h>
 #include <Bitmap.h>
+#include <Button.h>
 #include <GridView.h>
 #include <LayoutBuilder.h>
 #include <ScrollView.h>
@@ -15,6 +17,7 @@
 #include <TextControl.h>
 #include <TranslationUtils.h>
 
+#include "covers.h"
 #include "Query.h"
 #include "Utility.h"
 
@@ -24,7 +27,6 @@ static const uint32 kMaxColumns = 4;
 
 static const uint32 kMsgAddImage = 'adIm';
 static const uint32 kMsgQuery = 'quer';
-static const uint32 kMsgSelect = 'sele';
 
 
 class ImageLoaderResultListener : public ResultListener {
@@ -183,7 +185,7 @@ IconView::MouseDown(BPoint where)
 	if (count == 1)
 		SetSelected(!IsSelected());
 	else if (count == 2) {
-		BMessage select(kMsgSelect);
+		BMessage select(kMsgSelected);
 		select.AddString("id", fIdentifier);
 		select.AddString("image_url", fImageUrl);
 		Window()->PostMessage(&select);
@@ -247,6 +249,7 @@ CoverWindow::CoverWindow()
 {
 	fArtistControl = new BTextControl("Artist", "", new BMessage(kMsgQuery));
 	fTitleControl = new BTextControl("Title", "", new BMessage(kMsgQuery));
+	BButton* skipButton = new BButton("Skip", new BMessage(kMsgSkip));
 
 	fMainView = new BGridView("main");
 	fMainView->SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED, B_SIZE_UNLIMITED));
@@ -260,8 +263,11 @@ CoverWindow::CoverWindow()
 			.SetInsets(B_USE_DEFAULT_SPACING)
 			.Add(fArtistControl)
 			.Add(fTitleControl)
+			.Add(skipButton)
 		.End()
 		.Add(scrollView);
+
+	fArtistControl->MakeFocus(true);
 }
 
 
@@ -292,9 +298,11 @@ CoverWindow::MessageReceived(BMessage* message)
 			}
 			break;
 		}
-		case kMsgSelect:
+		case kMsgSelected:
 		{
 			message->PrintToStream();
+			be_app->PostMessage(kMsgSelected);
+			PostMessage(B_QUIT_REQUESTED);
 			break;
 		}
 		case kMsgQuery:
@@ -310,6 +318,10 @@ CoverWindow::MessageReceived(BMessage* message)
 			fQuery->Run();
 			break;
 		}
+		case kMsgSkip:
+			be_app->PostMessage(kMsgSkip);
+			PostMessage(B_QUIT_REQUESTED);
+			break;
 		default:
 			BWindow::MessageReceived(message);
 			break;
